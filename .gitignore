@@ -34,4 +34,5 @@ share/python-wheels/
 
 # Local/Temporary Files
 requirements_doc.txt
+AI_CONTEXT.md
 *.log
