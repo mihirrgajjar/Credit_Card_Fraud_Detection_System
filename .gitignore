@@ -1,12 +1,11 @@
-# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
 
-# C extensions
+
 *.so
 
-# Distribution / packaging
+
 .Python
 build/
 develop-eggs/
@@ -25,14 +24,12 @@ share/python-wheels/
 .installed.cfg
 *.egg
 
-# Jupyter Notebook checkpoints
+
 .ipynb_checkpoints
 
-# VS Code / IDE configuration
+
 .vscode/
 .idea/
 
-# Local/Temporary Files
-requirements_doc.txt
-AI_CONTEXT.md
 *.log
+
