@@ -1920,7 +1920,7 @@ elif page == "Batch prediction":
             tbl_header_cols = [
                 "#", "Amount (INR)", "Hour", "Day", "Merchant",
                 "Distance (km)", "CVV Mismatch", "Txns (24h)", "Card Present",
-                "Result", "Confidence",
+                "Result",
             ]
             tbl_header_html = "".join(
                 f'<th style="background-color:{C_CARD_BG2};color:{C_TEXT_MUTED};'
@@ -1967,14 +1967,9 @@ elif page == "Batch prediction":
                     f'padding:3px 10px;display:inline-block;white-space:nowrap;">'
                     f'{badge_lbl_r}</span></td>'
                 )
-                conf_cell_r = (
-                    f'<td style="padding:7px 10px;color:{C_TEXT2};font-size:12px;'
-                    f'border-bottom:0.5px solid {C_BORDER};">'
-                    f'{row["Fraud_Probability_%"]:.1f}%</td>'
-                )
                 tbl_rows_html_r += (
                     f'<tr style="background-color:{row_bg_r};">'
-                    f'{cells_html_r}{result_cell_r}{conf_cell_r}</tr>'
+                    f'{cells_html_r}{result_cell_r}</tr>'
                 )
 
             st.markdown(
