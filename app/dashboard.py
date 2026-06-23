@@ -142,15 +142,18 @@ st.markdown(f"""
     font-size: 13px !important;
     font-weight: 400 !important;
     color: {C_TEXT2} !important;
-    padding: 8px 12px !important;
+    padding: 10px 12px !important;
+    margin-bottom: 8px !important;
     border-radius: 8px !important;
     cursor: pointer !important;
     display: flex !important;
     align-items: center !important;
+    transition: background-color 0.2s ease !important;
   }}
   section[data-testid="stSidebar"] .stRadio > div > label:hover {{
     background-color: {C_NAV_BG} !important;
     color: {C_NAV_TEXT} !important;
+    transform: translateX(2px) !important;
   }}
   section[data-testid="stSidebar"] .stRadio > div > label:has(input:checked) {{
     background-color: {C_NAV_BG} !important;
