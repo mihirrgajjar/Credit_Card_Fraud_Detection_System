@@ -30,8 +30,5 @@ share/python-wheels/
 
 .vscode/
 .idea/
-
-*.log
 credit_card_fraud_PowerBi_Dashboard.pbix
-
-
+*.log
