@@ -6,6 +6,8 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 import joblib
+import json
+import io
 
 st.set_page_config(
     page_title="Credit Card Fraud Detection System",
@@ -59,6 +61,7 @@ if is_dark:
     C_FRAUD_RESULT_BG       = "#501313"
     C_FRAUD_RESULT_BORDER   = "#A32D2D"
     C_FRAUD_RESULT_TEXT     = "#F09595"
+    C_HOVER_TEXT            = "#1A1A2E"
     TOGGLE_LABEL            = "Light mode"
     TOGGLE_BG               = "#252840"
     TOGGLE_TEXT_C           = "#AFA9EC"
@@ -104,6 +107,7 @@ else:
     C_FRAUD_RESULT_BG       = "#FCEBEB"
     C_FRAUD_RESULT_BORDER   = "#A32D2D"
     C_FRAUD_RESULT_TEXT     = "#A32D2D"
+    C_HOVER_TEXT            = "#FFFFFF"
     TOGGLE_LABEL            = "Dark mode"
     TOGGLE_BG               = "#F1EFE8"
     TOGGLE_TEXT_C           = "#5F5E5A"
@@ -368,6 +372,25 @@ st.markdown(f"""
   div[data-testid="stButton"]:has(button[kind="secondary"]) button:hover {{
     background-color: #1470BA !important;
     color: #FFFFFF !important;
+  }}
+
+  /* Custom download buttons styling */
+  div[data-testid="stDownloadButton"] button {{
+    background-color: transparent !important;
+    color: {C_BLUE} !important;
+    border: 1px solid {C_BLUE} !important;
+    border-radius: 8px !important;
+    font-size: 13px !important;
+    font-weight: 500 !important;
+    width: 100% !important;
+    padding: 11px 0 !important;
+    letter-spacing: 0.02em !important;
+    cursor: pointer !important;
+    transition: background-color 0.15s ease, color 0.15s ease !important;
+  }}
+  div[data-testid="stDownloadButton"] button:hover {{
+    background-color: {C_BLUE} !important;
+    color: {C_HOVER_TEXT} !important;
   }}
 
 </style>
@@ -1396,6 +1419,12 @@ elif page == "Check a transaction":
 elif page == "Batch prediction":
     render_top_bar("Batch prediction")
 
+    st.markdown(
+        f'<div style="font-size:12px;color:{C_TEXT_MUTED};margin-top:-8px;margin-bottom:16px;">'
+        f'Upload a file and we\'ll run predictions on every row</div>',
+        unsafe_allow_html=True,
+    )
+
     # -----------------------------------------------------------------------
     # Constants used by validation and prediction
     # -----------------------------------------------------------------------
@@ -1416,6 +1445,92 @@ elif page == "Batch prediction":
         "is_high_risk_merchant", "card_present", "location_match",
         "cvv_mismatch", "international_transaction",
     ]
+
+    # -----------------------------------------------------------------------
+    # Helpers for Multi-Format Upload & Templates
+    # -----------------------------------------------------------------------
+    @st.cache_data
+    def generate_templates():
+        # Empty DataFrame with correct columns
+        empty_df = pd.DataFrame(columns=REQUIRED_COLUMNS)
+
+        # CSV template
+        csv_bytes = empty_df.to_csv(index=False).encode("utf-8")
+
+        # JSON template — array of objects format (empty array)
+        # Also include a "columns" key so user knows what fields to fill
+        json_template = {
+            "columns": REQUIRED_COLUMNS,
+            "transactions": []
+        }
+        json_bytes = json.dumps(json_template, indent=2).encode("utf-8")
+
+        # XLSX template
+        xlsx_buffer = io.BytesIO()
+        with pd.ExcelWriter(xlsx_buffer, engine="openpyxl") as writer:
+            empty_df.to_excel(writer, index=False, sheet_name="Transactions")
+        xlsx_bytes = xlsx_buffer.getvalue()
+
+        return csv_bytes, json_bytes, xlsx_bytes
+
+    csv_template, json_template, xlsx_template = generate_templates()
+
+    def detect_format(uploaded_file):
+        name = uploaded_file.name.lower()
+        if name.endswith(".csv"):
+            return "csv"
+        elif name.endswith(".json"):
+            return "json"
+        elif name.endswith(".xlsx") or name.endswith(".xls"):
+            return "xlsx"
+        else:
+            return None
+
+    def load_uploaded_file(uploaded_file):
+        fmt = detect_format(uploaded_file)
+
+        try:
+            if fmt == "csv":
+                df = pd.read_csv(uploaded_file)
+
+            elif fmt == "json":
+                try:
+                    content = json.load(uploaded_file)
+                except json.JSONDecodeError:
+                    st.error("This file could not be read as JSON. Make sure it is valid JSON format.")
+                    return None
+
+                if isinstance(content, list):
+                    df = pd.DataFrame(content)
+                elif isinstance(content, dict) and "transactions" in content:
+                    if len(content["transactions"]) == 0:
+                        st.error("No transactions found in the JSON file. Add data inside the 'transactions' array.")
+                        return None
+                    df = pd.DataFrame(content["transactions"])
+                else:
+                    st.error("JSON structure not recognized. Use the provided template or format as an array of objects.")
+                    return None
+
+            elif fmt == "xlsx":
+                try:
+                    df = pd.read_excel(uploaded_file, sheet_name="Transactions", engine="openpyxl")
+                except Exception:
+                    try:
+                        # Fallback: try reading first sheet if "Transactions" sheet not found
+                        df = pd.read_excel(uploaded_file, sheet_name=0, engine="openpyxl")
+                        st.warning("Sheet named 'Transactions' not found — reading first sheet instead.")
+                    except Exception:
+                        st.error("This XLSX file could not be opened. Try re-saving it in Excel and uploading again.")
+                        return None
+            else:
+                st.error("Unsupported file format. Please upload a .csv, .json, or .xlsx file.")
+                return None
+
+            return df
+
+        except Exception as e:
+            st.error(f"Could not read the file. Error: {str(e)}")
+            return None
 
     # -----------------------------------------------------------------------
     # Helper: validate uploaded DataFrame before touching the model
@@ -1499,11 +1614,71 @@ elif page == "Batch prediction":
         return result
 
     @st.cache_data
-    def convert_df_to_csv(df):
-        return df.to_csv(index=False).encode("utf-8")
+    def convert_results(result_df, original_filename):
+        # 1. CSV
+        csv_bytes = result_df.to_csv(index=False).encode("utf-8")
+
+        # 2. JSON — array of objects format (most readable)
+        json_bytes = result_df.to_json(orient="records", indent=2).encode("utf-8")
+
+        # 3. XLSX
+        xlsx_buffer = io.BytesIO()
+        with pd.ExcelWriter(xlsx_buffer, engine="openpyxl") as writer:
+            result_df.to_excel(writer, index=False, sheet_name="Predictions")
+        xlsx_bytes = xlsx_buffer.getvalue()
+
+        # Base filename without extension
+        base_name = original_filename.rsplit(".", 1)[0]
+
+        return csv_bytes, json_bytes, xlsx_bytes, base_name
 
     # -----------------------------------------------------------------------
-    # Section 2 — CSV Format Guide (always visible)
+    # Section 1 — Template Download Section
+    # -----------------------------------------------------------------------
+    st.markdown(
+        f'<div style="font-size:13px;font-weight:500;color:{C_TEXT1};margin-bottom:2px;">'
+        f'Don\'t have a file? Download a template</div>'
+        f'<div style="font-size:11px;color:{C_TEXT_MUTED};margin-bottom:12px;">'
+        f'Fill in your transaction data and upload it back for predictions</div>',
+        unsafe_allow_html=True,
+    )
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.download_button(
+            label="Download CSV template",
+            data=csv_template,
+            file_name="sample_transactions_template.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+
+    with col2:
+        st.download_button(
+            label="Download JSON template",
+            data=json_template,
+            file_name="sample_transactions_template.json",
+            mime="application/json",
+            use_container_width=True
+        )
+
+    with col3:
+        st.download_button(
+            label="Download XLSX template",
+            data=xlsx_template,
+            file_name="sample_transactions_template.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
+
+    st.markdown(
+        f'<hr style="border:none;border-top:0.5px solid {C_BORDER};margin:16px 0 16px 0;">',
+        unsafe_allow_html=True,
+    )
+
+    # -----------------------------------------------------------------------
+    # Section 2 — File Format Requirements (always visible)
     # -----------------------------------------------------------------------
     amber_border = "#EF9F27" if is_dark else "#854F0B"
     amber_bg     = "#3D2A00" if is_dark else "#FEF3CD"
@@ -1546,10 +1721,10 @@ elif page == "Batch prediction":
         f'<div style="background-color:{amber_bg};border:1px solid {amber_border};'
         f'border-radius:10px;padding:1rem;margin-bottom:16px;">'
         f'<div style="font-size:13px;font-weight:500;color:{amber_text};margin-bottom:6px;">'
-        f'How to format your file</div>'
+        f'File Format Requirements</div>'
         f'<div style="font-size:12px;color:{C_TEXT2};margin-bottom:12px;">'
-        f'Upload a CSV and we\'ll run predictions on every row. It needs exactly these 15 columns '
-        f'(case-sensitive). Don\'t include an <code>is_fraud</code> column — '
+        f'Your file must contain exactly these 15 columns. Accepted file formats: .csv, .json, .xlsx. '
+        f'Don\'t include an <code>is_fraud</code> column — '
         f'we\'ll predict that for you.</div>'
         f'<div style="border-radius:8px;overflow:hidden;">'
         f'<table style="width:100%;border-collapse:collapse;">'
@@ -1582,17 +1757,17 @@ elif page == "Batch prediction":
     # -----------------------------------------------------------------------
     st.markdown(
         f'<div style="font-size:13px;font-weight:500;color:{C_TEXT1};margin-bottom:2px;">'
-        f'Upload your transaction CSV file</div>'
+        f'Upload your transaction file</div>'
         f'<div style="font-size:11px;color:{C_TEXT_MUTED};margin-bottom:4px;">'
-        f'Accepted format: .csv only</div>'
+        f'Accepted formats: .csv, .json, .xlsx</div>'
         f'<div style="font-size:12px;color:{C_TEXT_MUTED};text-align:center;margin-bottom:6px;">'
-        f'No file uploaded yet. Drop a CSV below to get started.</div>',
+        f'No file uploaded yet. Drop a file below to get started.</div>',
         unsafe_allow_html=True,
     )
 
     uploaded_file = st.file_uploader(
-        "Upload CSV",
-        type=["csv"],
+        "Upload file",
+        type=["csv", "json", "xlsx"],
         label_visibility="collapsed",
     )
 
@@ -1605,16 +1780,26 @@ elif page == "Batch prediction":
 
     if uploaded_file is not None:
         # File info row
-        file_size_kb = round(len(uploaded_file.getvalue()) / 1024, 1)
-        raw_df       = pd.read_csv(uploaded_file)
+        file_size_kb = round(uploaded_file.size / 1024, 1)
+        raw_df = load_uploaded_file(uploaded_file)
+        
+        if raw_df is None:
+            st.stop()
+            
         row_count_up = len(raw_df)
+        fmt = detect_format(uploaded_file)
+        fmt_display = {"csv": "CSV", "json": "JSON", "xlsx": "XLSX"}.get(fmt, "Unknown")
 
         st.markdown(
             f'<div style="background-color:{C_CARD_BG2};border:0.5px solid {C_BORDER};'
             f'border-radius:8px;padding:8px 14px;margin-bottom:12px;'
             f'font-size:12px;color:{C_TEXT_MUTED};display:flex;gap:16px;">'
             f'<span><strong style="color:{C_TEXT1};">{uploaded_file.name}</strong></span>'
+            f'<span>|</span>'
             f'<span>{file_size_kb} KB</span>'
+            f'<span>|</span>'
+            f'<span>Format: <strong style="color:{C_TEXT1};">{fmt_display}</strong></span>'
+            f'<span>|</span>'
             f'<span>{row_count_up:,} rows detected</span>'
             f'</div>',
             unsafe_allow_html=True,
@@ -1834,14 +2019,38 @@ elif page == "Batch prediction":
             # -------------------------------------------------------------------
             # Section 5c — Download Button
             # -------------------------------------------------------------------
-            csv_bytes = convert_df_to_csv(result_df)
-            st.download_button(
-                label="Download results",
-                data=csv_bytes,
-                file_name=f"fraud_predictions_{uploaded_file.name}",
-                mime="text/csv",
-                use_container_width=True,
-            )
+            csv_bytes, json_bytes, xlsx_bytes, base_name = convert_results(result_df, uploaded_file.name)
+
+            st.markdown("**Download results as:**")
+
+            col_dl1, col_dl2, col_dl3 = st.columns(3)
+
+            with col_dl1:
+                st.download_button(
+                    label="Download as CSV",
+                    data=csv_bytes,
+                    file_name=f"fraud_predictions_{base_name}.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+
+            with col_dl2:
+                st.download_button(
+                    label="Download as JSON",
+                    data=json_bytes,
+                    file_name=f"fraud_predictions_{base_name}.json",
+                    mime="application/json",
+                    use_container_width=True
+                )
+
+            with col_dl3:
+                st.download_button(
+                    label="Download as XLSX",
+                    data=xlsx_bytes,
+                    file_name=f"fraud_predictions_{base_name}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True
+                )
 
             st.markdown("<div style='height:10px;'></div>", unsafe_allow_html=True)
 

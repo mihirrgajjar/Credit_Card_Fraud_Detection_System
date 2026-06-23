@@ -7,3 +7,4 @@ imbalanced-learn
 streamlit
 joblib
 plotly
+openpyxl>=3.1.0
